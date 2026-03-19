@@ -2,9 +2,6 @@ name: Reusable Gemini Code Review
 
 on:
   workflow_call:
-    secrets:
-      GEMINI_API_KEY:
-        required: true
 
 permissions:
   contents: read
@@ -15,14 +12,68 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repo
+      - name: Checkout PR code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Gemini Code Review
-        uses: truongnh1992/gemini-ai-code-reviewer@main
+      - name: Get PR diff
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          git diff origin/${{ github.base_ref }} > diff.txt
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          python-version: "3.11"
+
+      - name: Install Gemini SDK
+        run: pip install google-generativeai
+
+      - name: Run AI Review
+        env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: "gemini-1.5-flash"
+        run: |
+          python <<EOF
+import os
+import google.generativeai as genai
+
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+
+with open("diff.txt", "r") as f:
+    diff = f.read()
+
+model = genai.GenerativeModel("gemini-1.5-flash")
+
+prompt = f"""
+You are a senior software engineer.
+
+Review this pull request diff and provide:
+- Bugs
+- Security issues
+- Code improvements
+- Performance suggestions
+
+DIFF:
+{diff}
+"""
+
+response = model.generate_content(prompt)
+
+with open("review.txt", "w") as f:
+    f.write(response.text)
+EOF
+
+      - name: Post Comment to PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const review = fs.readFileSync('review.txt', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: "## 🤖 AI Code Review\n\n" + review
+            });
