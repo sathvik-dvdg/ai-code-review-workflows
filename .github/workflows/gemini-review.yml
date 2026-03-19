@@ -12,24 +12,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout code
       - name: Checkout PR code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # 2️⃣ Get PR diff (FIXED VERSION)
       - name: Get PR diff
         run: |
-          git fetch origin ${{ github.base_ref }}
-          git diff origin/${{ github.base_ref }} > diff.txt
+          git fetch origin
+          git diff HEAD^ HEAD > diff.txt || echo "No diff" > diff.txt
 
+      # 3️⃣ Debug diff (IMPORTANT)
+      - name: Debug diff
+        run: |
+          echo "==== DIFF CONTENT ===="
+          cat diff.txt
+
+      # 4️⃣ Limit diff size (prevent Gemini crash)
+      - name: Limit diff size
+        run: |
+          head -c 15000 diff.txt > small_diff.txt
+          mv small_diff.txt diff.txt
+
+      # 5️⃣ Setup Python
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      - name: Install Gemini SDK
+      # 6️⃣ Install Gemini SDK
+      - name: Install dependencies
         run: pip install google-generativeai
 
+      # 7️⃣ Run AI Review (SAFE VERSION)
       - name: Run AI Review
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -38,32 +55,72 @@ jobs:
 import os
 import google.generativeai as genai
 
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+api_key = os.getenv("GEMINI_API_KEY")
 
+if not api_key:
+    raise ValueError("❌ GEMINI_API_KEY is missing")
+
+genai.configure(api_key=api_key)
+
+# Read diff
 with open("diff.txt", "r") as f:
     diff = f.read()
+
+if not diff.strip():
+    diff = "No significant changes found."
 
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 prompt = f"""
-You are a senior software engineer.
+You are a senior software engineer performing a professional code review.
 
-Review this pull request diff and provide:
-- Bugs
-- Security issues
-- Code improvements
-- Performance suggestions
+Analyze the following GitHub Pull Request diff.
+
+Return output in this EXACT format:
+
+## 🧠 Overall Summary
+(Short summary)
+
+## 🐛 Bugs
+- List bugs
+
+## 🔐 Security Issues
+- List vulnerabilities
+
+## ⚡ Performance Issues
+- Optimization suggestions
+
+## 🎯 Code Quality Improvements
+- Best practices
+
+## 📊 Final Score (out of 10)
+
+## ✅ Verdict
+(Approve / Request Changes)
 
 DIFF:
 {diff}
 """
 
-response = model.generate_content(prompt)
+try:
+    response = model.generate_content(prompt)
 
+    if not response or not hasattr(response, "text"):
+        output = "⚠️ Gemini did not return a valid response."
+    else:
+        output = response.text
+
+except Exception as e:
+    output = f"❌ Gemini Error: {str(e)}"
+
+# Save output
 with open("review.txt", "w") as f:
-    f.write(response.text)
+    f.write(output)
+
+print("✅ Review generated successfully")
 EOF
 
+      # 8️⃣ Post comment to PR
       - name: Post Comment to PR
         uses: actions/github-script@v7
         with:
@@ -71,9 +128,18 @@ EOF
             const fs = require('fs');
             const review = fs.readFileSync('review.txt', 'utf8');
 
+            const body = `
+## 🤖 AI Code Review (Gemini)
+
+${review}
+
+---
+💡 Automated review powered by Gemini AI
+`;
+
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: "## 🤖 AI Code Review\n\n" + review
+              body: body
             });
