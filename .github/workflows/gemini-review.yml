@@ -2,6 +2,9 @@ name: Gemini Code Review
 
 on:
   workflow_call:
+    secrets:
+      GEMINI_API_KEY:
+        required: true
 
 permissions:
   contents: read
@@ -14,10 +17,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Crucial: gets history so git diff HEAD^ works
 
       - name: Create diff
         run: |
           git fetch origin
+          # Compare current HEAD with previous commit
           git diff HEAD^ HEAD > diff.txt || echo "No diff" > diff.txt
 
       - name: Setup Python
@@ -30,28 +36,35 @@ jobs:
 
       - name: Create review script
         run: |
-          cat > review.py << 'EOF'
-import os
-import google.generativeai as genai
+          # The Python code below is indented to satisfy YAML, 
+          # but the 'cat' command will strip that indentation for the file.
+          cat << 'EOF' > review.py
+          import os
+          import google.generativeai as genai
 
-api_key = os.getenv("GEMINI_API_KEY")
-if not api_key:
-    raise Exception("Missing API key")
+          api_key = os.getenv("GEMINI_API_KEY")
+          if not api_key:
+              raise Exception("Missing API key")
 
-genai.configure(api_key=api_key)
+          genai.configure(api_key=api_key)
 
-with open("diff.txt") as f:
-    diff = f.read()
+          if not os.path.exists("diff.txt"):
+              output = "No diff file found."
+          else:
+              with open("diff.txt") as f:
+                  diff = f.read()
+              
+              if not diff.strip() or diff.strip() == "No diff":
+                  output = "No significant changes detected for review."
+              else:
+                  model = genai.GenerativeModel("gemini-1.5-flash")
+                  prompt = f"Review this git diff and suggest improvements or catch bugs:\n\n{diff}"
+                  response = model.generate_content(prompt)
+                  output = response.text if response and hasattr(response, 'text') else "AI could not generate a response."
 
-model = genai.GenerativeModel("gemini-1.5-flash")
-
-response = model.generate_content(f"Review this code:\n{diff}")
-
-output = response.text if response and hasattr(response, "text") else "No response"
-
-with open("review.txt", "w") as f:
-    f.write(output)
-EOF
+          with open("review.txt", "w") as f:
+              f.write(output)
+          EOF
 
       - name: Run review
         env:
@@ -63,11 +76,12 @@ EOF
         with:
           script: |
             const fs = require('fs');
-            const review = fs.readFileSync('review.txt', 'utf8');
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: "## 🤖 AI Review\n\n" + review
-            });
+            if (fs.existsSync('review.txt')) {
+              const review = fs.readFileSync('review.txt', 'utf8');
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: "## 🤖 Gemini AI Code Review\n\n" + review
+              });
+            }
