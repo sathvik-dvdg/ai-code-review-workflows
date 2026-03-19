@@ -34,11 +34,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install Gemini SDK
-        run: pip install google-genai
+        run: pip install --upgrade google-genai
 
       - name: Create review script
         run: |
-          # This block CREATES the review.py file on the fly!
           cat << 'EOF' > review.py
           import os
           from google import genai
@@ -56,12 +55,12 @@ jobs:
                   diff_content = f.read()
               
               if not diff_content.strip() or diff_content.strip() == "No diff":
-                  output = "No code changes detected for review."
+                  output = "No code changes detected."
               else:
-                  # Targeting the latest available model
+                  # 🚀 Using Gemini 3 Flash Preview for advanced reasoning
                   response = client.models.generate_content(
-                      model="gemini-2.0-flash",
-                      contents=f"Review this git diff for bugs and logic issues:\n\n{diff_content}"
+                      model="gemini-3-flash-preview",
+                      contents=f"Act as a Senior Cryptography Engineer. Review this git diff for TrustLink-ZK. Look for bugs, performance issues, and specifically check for logic errors in any Zero-Knowledge proof implementation:\n\n{diff_content}"
                   )
                   output = response.text if response and response.text else "AI response failed."
 
@@ -85,6 +84,6 @@ jobs:
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: "## 🤖 AI Code Review\n\n" + review
+                body: "## 🤖 Gemini 3 Flash AI Review\n\n" + review
               });
             }
