@@ -26,6 +26,7 @@ jobs:
       - name: Create diff
         run: |
           git fetch origin
+          # Captures the changes between the last two commits
           git diff HEAD^ HEAD > diff.txt || echo "No diff" > diff.txt
 
       - name: Setup Python
@@ -34,6 +35,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Gemini SDK
+        # Upgrading to the modern library is the key to solving the 404 error
         run: pip install --upgrade google-genai
 
       - name: Create review script
@@ -44,8 +46,9 @@ jobs:
 
           api_key = os.getenv("GEMINI_API_KEY")
           if not api_key:
-              raise Exception("Missing API key")
+              raise Exception("Missing API key: GEMINI_API_KEY")
 
+          # The genai.Client defaults to the stable v1 API
           client = genai.Client(api_key=api_key)
 
           if not os.path.exists("diff.txt"):
@@ -55,14 +58,14 @@ jobs:
                   diff_content = f.read()
               
               if not diff_content.strip() or diff_content.strip() == "No diff":
-                  output = "No code changes detected."
+                  output = "No code changes detected for review."
               else:
-                  # 🚀 Using Gemini 3 Flash Preview for advanced reasoning
+                  # Targeting Gemini 3 Flash Preview for superior logic reasoning
                   response = client.models.generate_content(
                       model="gemini-3-flash-preview",
-                      contents=f"Act as a Senior Cryptography Engineer. Review this git diff for TrustLink-ZK. Look for bugs, performance issues, and specifically check for logic errors in any Zero-Knowledge proof implementation:\n\n{diff_content}"
+                      contents=f"Act as a Senior Software Engineer. Review the following git diff for bugs, logic errors, and security vulnerabilities:\n\n{diff_content}"
                   )
-                  output = response.text if response and response.text else "AI response failed."
+                  output = response.text if response and response.text else "AI could not generate a response."
 
           with open("review.txt", "w") as f:
               f.write(output)
@@ -84,6 +87,6 @@ jobs:
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: "## 🤖 Gemini 3 Flash AI Review\n\n" + review
+                body: "## 🤖 Gemini 3 AI Review\n\n" + review
               });
             }
