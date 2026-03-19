@@ -6,7 +6,6 @@ on:
       GEMINI_API_KEY:
         required: true
 
-# Opt into Node 24 to remove deprecation warnings
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -22,12 +21,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0  # Necessary for git diff to find history
+          fetch-depth: 0
 
       - name: Create diff
         run: |
           git fetch origin
-          # Compare HEAD against its parent; handle cases with no diff safely
           git diff HEAD^ HEAD > diff.txt || echo "No diff" > diff.txt
 
       - name: Setup Python
@@ -36,21 +34,21 @@ jobs:
           python-version: "3.12"
 
       - name: Install Gemini SDK
-        run: pip install google-generativeai
+        # 🚀 Switching to the new, non-deprecated library
+        run: pip install google-genai
 
       - name: Create review script
         run: |
-          # The EOF marker and the code inside are indented to satisfy YAML parsing.
-          # The shell will treat everything between the EOF markers as the file content.
           cat << 'EOF' > review.py
           import os
-          import google.generativeai as genai
+          from google import genai
 
           api_key = os.getenv("GEMINI_API_KEY")
           if not api_key:
-              raise Exception("Missing API key: GEMINI_API_KEY")
+              raise Exception("Missing API key")
 
-          genai.configure(api_key=api_key)
+          # Initialize the new Client
+          client = genai.Client(api_key=api_key)
 
           if not os.path.exists("diff.txt"):
               output = "No diff file found."
@@ -59,12 +57,14 @@ jobs:
                   diff_content = f.read()
               
               if not diff_content.strip() or diff_content.strip() == "No diff":
-                  output = "No changes detected in this PR for review."
+                  output = "No code changes detected for review."
               else:
-                  model = genai.GenerativeModel("gemini-1.5-flash")
-                  prompt = f"Act as a senior developer. Review the following code changes and suggest improvements or highlight potential bugs:\n\n{diff_content}"
-                  response = model.generate_content(prompt)
-                  output = response.text if response and hasattr(response, 'text') else "AI could not generate a response."
+                  # Updated model generation syntax
+                  response = client.models.generate_content(
+                      model="gemini-1.5-flash",
+                      contents=f"Act as a senior developer. Review this git diff and suggest improvements or catch bugs:\n\n{diff_content}"
+                  )
+                  output = response.text if response and response.text else "AI could not generate a response."
 
           with open("review.txt", "w") as f:
               f.write(output)
