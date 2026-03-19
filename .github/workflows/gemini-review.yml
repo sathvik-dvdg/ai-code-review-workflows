@@ -1,4 +1,4 @@
-name: Reusable Gemini Code Review
+name: Run AI Review
 
 on:
   workflow_call:
