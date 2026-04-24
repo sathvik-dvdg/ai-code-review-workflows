@@ -1,0 +1,118 @@
+name: Gemini Code Review
+
+on:
+  workflow_call:
+    secrets:
+      GEMINI_API_KEY:
+        required: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create diff
+        run: |
+          git fetch origin
+          git diff HEAD^ HEAD > diff.txt || echo "No diff" > diff.txt
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      - name: Install Gemini SDK
+        run: pip install --upgrade google-genai
+
+      - name: Create review script
+        run: |
+          cat << 'EOF' > review.py
+import os
+from google import genai
+
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
+    raise Exception("Missing API key: GEMINI_API_KEY")
+
+client = genai.Client(api_key=api_key)
+
+if not os.path.exists("diff.txt"):
+    output = "No diff file found."
+else:
+    with open("diff.txt", "r") as f:
+        diff_content = f.read()
+
+    if not diff_content.strip() or diff_content.strip() == "No diff":
+        output = "No code changes detected for review."
+    else:
+        prompt = f"""
+You are a senior Staff-level Software Engineer, Security Auditor, and GitHub Code Reviewer.
+
+Your task is to perform a deep, critical review.
+
+## INPUT
+Diff:
+{diff_content}
+
+## OUTPUT FORMAT
+
+### 🔴 Critical Issues
+- Issue
+- Why dangerous
+- Failure scenario
+- Fix
+
+### 🟠 Major Issues
+### 🟡 Minor Issues
+### 🔐 Security Risks
+### 🧠 Architecture Problems
+### 🧪 Missing Tests
+### ⚙️ Refactoring Suggestions
+
+## RULES
+- Be brutally honest
+- Focus on real risks
+"""
+
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=prompt
+        )
+
+        output = response.text if response and response.text else "AI could not generate a response."
+
+with open("review.txt", "w") as f:
+    f.write(output)
+EOF
+
+      - name: Run review
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python review.py
+
+      - name: Comment PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (fs.existsSync('review.txt')) {
+              const review = fs.readFileSync('review.txt', 'utf8');
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: "## 🤖 Gemini AI Review\n\n" + review
+              });
+            }
